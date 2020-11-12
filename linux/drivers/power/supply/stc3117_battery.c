@@ -100,6 +100,12 @@ static int STC31xx_RelaxTmrSet(int CurrentThreshold);
 
 #define AVGFILTER           4  /* average filter constant */
 
+
+//uncomment the table to select the table corresponding to the attached battery:
+#define SELECT_DEFAULT_BATTERY_4V20_MAX
+//#define SELECT_DEFAULT_BATTERY_4V35_MAX
+//#define SELECT_CUSTOM_BATTERY_OCV
+
 /* ******************************************************************************** */
 
 
@@ -232,7 +238,7 @@ typedef struct  {
 	int ExternalTemperatureValue;
 	int ForceExternalTemperature;
 	int Ropt;  
-	int Var1;
+	//int Var1;
 } GasGauge_DataTypeDef;
 
 /* structure of the STC311x battery monitoring data */
@@ -292,10 +298,10 @@ static STC311x_BattDataTypeDef BattData;   /* STC311x data */
 static union {
 	unsigned char db[RAM_SIZE];  /* last byte holds the CRC */
 	struct {
-		short int TstWord;     /* 0-1 */
-		short int HRSOC;       /* 2-3 SOC backup */
-		short int CC_cnf;      /* 4-5 current CC_cnf */
-		short int VM_cnf;      /* 6-7 current VM_cnf */
+		unsigned short TstWord;     /* 0-1 */
+		unsigned short HRSOC;       /* 2-3 SOC backup */
+		unsigned short CC_cnf;      /* 4-5 current CC_cnf */
+		unsigned short VM_cnf;      /* 6-7 current VM_cnf */
 		char SOC;              /* 8 SOC for trace (in %) */
 		char GG_Status;        /* 9  */
 		/* bytes ..RAM_SIZE-2 are free, last byte RAM_SIZE-1 is the CRC */
@@ -352,9 +358,36 @@ int Temperature_fn(void)
 	return (25);
 }
 
+//----------------------------------------------------------------
+#define SOCTAB_DEFAULT { 0x00, 0x06, 0x0C, 0x14, 0x1E, 0x28, 0x32, 0x3C, 0x50, 0x64, 0x78, 0x82, 0x8C, 0xA0, 0xB4, 0xC8 }
+
+#define OCVTAB_DEFAULT_BATTERY_4V20 { 0x1770, 0x1926, 0x19B2, 0x19FB, 0x1A3E, 0x1A6D, 0x1A9D, 0x1AB6, 0x1AD5, 0x1B01, 0x1B70, 0x1BB1, 0x1BE8, 0x1C58, 0x1CF3, 0x1DA9 }
+
+#define OCVTAB_DEFAULT_BATTERY_4V35 { 0x1770, 0x195D, 0x19EE, 0x1A1A, 0x1A59, 0x1A95, 0x1AB6, 0x1AC7, 0x1AEB, 0x1B2B, 0x1BCC, 0x1C13, 0x1C57, 0x1D09, 0x1DCF, 0x1EA2 }
+
+//Custom Battery: fill battery data from battery manufacturer datasheet
+#define OCVTAB_CUSTOM_BATTERY { 0x1770, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1B00, 0x1DA9 }
+
+//Custom Battery: fill battery data from battery manufacturer datasheet
+#define CAP_DERATING_DEFAULT { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+
+
+#if		defined(SELECT_DEFAULT_BATTERY_4V20_MAX)      //Default OCV curve for a 4.20V max battery
+#define OCVTAB_DEFAULT  OCVTAB_DEFAULT_BATTERY_4V20
+
+#elif	defined(SELECT_DEFAULT_BATTERY_4V35_MAX)      //Default OCV curve for a 4.35V max battery
+#define OCVTAB_DEFAULT  OCVTAB_DEFAULT_BATTERY_4V35
+
+#elif	defined(SELECT_CUSTOM_BATTERY_OCV)            //Custom data for battery used in final application
+#define OCVTAB_DEFAULT  OCVTAB_CUSTOM_BATTERY
+#endif
+//----------------------------------------------------------------
 
 static void stc311x_data_init(struct stc311x_platform_data *stc311x_data)
 {
+	const unsigned char DefaultSocTable[16] = SOCTAB_DEFAULT;
+	const unsigned short DefaultOcvTable[16] = OCVTAB_DEFAULT;
+	const unsigned char DefaultCapDerating[7] = CAP_DERATING_DEFAULT;
 	
 	stc311x_data->battery_online = NULL;
 	stc311x_data->charger_online = null_fn; 		// used in stc311x_set_battery_status()
@@ -363,7 +396,6 @@ static void stc311x_data_init(struct stc311x_platform_data *stc311x_data)
 	stc311x_data->power_supply_unregister = NULL;
 
 	//-------------------------------------------------------------------------
-	
 	//Battery specific, Mandatory:
 	stc311x_data->Cnom = 1500;       /* nominal battery capacity [in mAh] */
 	stc311x_data->Rint = 200;		/* nominal battery internal impedance [mOhms]*/
@@ -375,8 +407,8 @@ static void stc311x_data_init(struct stc311x_platform_data *stc311x_data)
 	//Hardware specific, Mandatory:
 	stc311x_data->Rsense = 10;       /* sense resistor [mOhms]*/
 	
-	//-------------------------------------------------------------------------
 	
+	//-------------------------------------------------------------------------
 	//Gas gauge specific, Default:
 	stc311x_data->Vmode= 0;       /* REG_MODE, BIT_VMODE 1=Voltage mode, 0=mixed mode */
 	stc311x_data->Alm_SOC = 10;      /* SOC alm level %*/
@@ -384,48 +416,52 @@ static void stc311x_data_init(struct stc311x_platform_data *stc311x_data)
 	stc311x_data->RelaxCurrent = 150; /* current for relaxation in mA (< C/20) */
 	stc311x_data->Adaptive = 1;     /* 1=Adaptive mode enabled, 0=Adaptive mode disabled */
 
+	//-------------------------------------------------------------------------
 	//Battery specific, default:
-	stc311x_data->CapDerating[6] = 0;   /* capacity de-rating in 0.1%, for temp = -20°C */
-	stc311x_data->CapDerating[5] = 0;   /* capacity de-rating in 0.1%, for temp = -10°C */
-	stc311x_data->CapDerating[4] = 0;   /* capacity de-rating in 0.1%, for temp = 0°C */
-	stc311x_data->CapDerating[3] = 0;   /* capacity de-rating in 0.1%, for temp = 10°C */
-	stc311x_data->CapDerating[2] = 0;   /* capacity de-rating in 0.1%, for temp = 25°C */
-	stc311x_data->CapDerating[1] = 0;   /* capacity de-rating in 0.1%, for temp = 40°C */
-	stc311x_data->CapDerating[0] = 0;   /* capacity de-rating in 0.1%, for temp = 60°C */
 
-	stc311x_data->SOCValue[0] = 0x00;    /* SOC=0% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[1] = 0x06;    /* SOC=3% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[2] = 0x0C;    /* SOC=6% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[3] = 0x14;    /* SOC=10% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[4] = 0x1E;    /* SOC=15% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[5] = 0x28;    /* SOC=20% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[6] = 0x32;    /* SOC=25% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[7] = 0x3C;    /* SOC=30% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[8] = 0x50;    /* SOC=40% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[9] = 0x64;    /* SOC=50% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[10] = 0x78;    /* SOC=60% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[11] = 0x82;    /* SOC=65% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[12] = 0x8C;    /* SOC=70% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[13] = 0xA0;    /* SOC=80% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[14] = 0xB4;    /* SOC=90% - default SOC axis for battery OCV curve */
-	stc311x_data->SOCValue[15] = 0xC8;    /* SOC=100% - default SOC axis for battery OCV curve */
+	stc311x_data->SOCValue[0] = DefaultSocTable[0];    /* SOC axis for battery OCV curve: SOC=0% */
+	stc311x_data->SOCValue[1] = DefaultSocTable[1];    /* SOC axis for battery OCV curve: SOC=3% */
+	stc311x_data->SOCValue[2] = DefaultSocTable[2];    /* SOC axis for battery OCV curve: SOC=6% */
+	stc311x_data->SOCValue[3] = DefaultSocTable[3];    /* SOC axis for battery OCV curve: SOC=10% */
+	stc311x_data->SOCValue[4] = DefaultSocTable[4];    /* SOC axis for battery OCV curve: SOC=15% */
+	stc311x_data->SOCValue[5] = DefaultSocTable[5];    /* SOC axis for battery OCV curve: SOC=20% */
+	stc311x_data->SOCValue[6] = DefaultSocTable[6];    /* SOC axis for battery OCV curve: SOC=25% */
+	stc311x_data->SOCValue[7] = DefaultSocTable[7];    /* SOC axis for battery OCV curve: SOC=30% */
+	stc311x_data->SOCValue[8] = DefaultSocTable[8];    /* SOC axis for battery OCV curve: SOC=40% */
+	stc311x_data->SOCValue[9] = DefaultSocTable[9];    /* SOC axis for battery OCV curve: SOC=50% */
+	stc311x_data->SOCValue[10] = DefaultSocTable[10];    /* SOC axis for battery OCV curve: SOC=60% */
+	stc311x_data->SOCValue[11] = DefaultSocTable[11];    /* SOC axis for battery OCV curve: SOC=65% */
+	stc311x_data->SOCValue[12] = DefaultSocTable[12];    /* SOC axis for battery OCV curve: SOC=70% */
+	stc311x_data->SOCValue[13] = DefaultSocTable[13];    /* SOC axis for battery OCV curve: SOC=80% */
+	stc311x_data->SOCValue[14] = DefaultSocTable[14];    /* SOC axis for battery OCV curve: SOC=90% */
+	stc311x_data->SOCValue[15] = DefaultSocTable[15];    /* SOC axis for battery OCV curve: SOC=100% */
 	
-	stc311x_data->OCVValue[0] = 3300;    /* default battery OCV curve (at 0%) : OCV=3.3V */
-	stc311x_data->OCVValue[1] = 3541;    /* default battery OCV curve (at 3%) : OCV=3.54V */
-	stc311x_data->OCVValue[2] = 3618;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[3] = 3658;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[4] = 3695;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[5] = 3721;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[6] = 3747;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[7] = 3761;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[8] = 3778;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[9] = 3802;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[10]= 3863;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[11]= 3899;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[12]= 3929;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[13]= 3991;    /* default battery OCV curve (at x%) : OCV=...V */
-	stc311x_data->OCVValue[14]= 4076;    /* default battery OCV curve (at 90%) : OCV=4.076V */
-	stc311x_data->OCVValue[15]= 4176;    /* default battery OCV curve (at 100%) : OCV=4.176V */
+
+	stc311x_data->OCVValue[0] = DefaultOcvTable[0];    /* battery OCV curve value at 0% : OCV=3.3V */
+	stc311x_data->OCVValue[1] = DefaultOcvTable[1];    /* battery OCV curve value at 3% : OCV=3.54V */
+	stc311x_data->OCVValue[2] = DefaultOcvTable[2];    /* battery OCV curve value at 6% : OCV=...V */
+	stc311x_data->OCVValue[3] = DefaultOcvTable[3];    /* battery OCV curve value at 10% : OCV=...V */
+	stc311x_data->OCVValue[4] = DefaultOcvTable[4];    /* battery OCV curve value at 15% : OCV=...V */
+	stc311x_data->OCVValue[5] = DefaultOcvTable[5];    /* battery OCV curve value at 20% : OCV=...V */
+	stc311x_data->OCVValue[6] = DefaultOcvTable[6];    /* battery OCV curve value at 25% : OCV=...V */
+	stc311x_data->OCVValue[7] = DefaultOcvTable[7];    /* battery OCV curve value at 30% : OCV=...V */
+	stc311x_data->OCVValue[8] = DefaultOcvTable[8];    /* battery OCV curve value at 40% : OCV=...V */
+	stc311x_data->OCVValue[9] = DefaultOcvTable[9];    /* battery OCV curve value at 50% : OCV=...V */
+	stc311x_data->OCVValue[10] = DefaultOcvTable[10];    /* battery OCV curve value at 60% : OCV=...V */
+	stc311x_data->OCVValue[11] = DefaultOcvTable[11];    /* battery OCV curve value at 65% : OCV=...V */
+	stc311x_data->OCVValue[12] = DefaultOcvTable[12];    /* battery OCV curve value at 70% : OCV=...V */
+	stc311x_data->OCVValue[13] = DefaultOcvTable[13];    /* battery OCV curve value at 80% : OCV=...V */
+	stc311x_data->OCVValue[14] = DefaultOcvTable[14];    /* battery OCV curve value at 90% : OCV=4.076V */
+	stc311x_data->OCVValue[15] = DefaultOcvTable[15];    /* battery OCV curve value at 100% : OCV=4.176V */
+
+
+	stc311x_data->CapDerating[6] = DefaultCapDerating[6];   /* capacity de-rating in 0.1%, for temp  =  -20 °C */
+	stc311x_data->CapDerating[5] = DefaultCapDerating[5];   /* capacity de-rating in 0.1%, for temp  =  -10 °C */
+	stc311x_data->CapDerating[4] = DefaultCapDerating[4];   /* capacity de-rating in 0.1%, for temp  =  0   °C */
+	stc311x_data->CapDerating[3] = DefaultCapDerating[3];   /* capacity de-rating in 0.1%, for temp  =  10  °C */
+	stc311x_data->CapDerating[2] = DefaultCapDerating[2];   /* capacity de-rating in 0.1%, for temp  =  25  °C */
+	stc311x_data->CapDerating[1] = DefaultCapDerating[1];   /* capacity de-rating in 0.1%, for temp  =  40  °C */
+	stc311x_data->CapDerating[0] = DefaultCapDerating[0];   /* capacity de-rating in 0.1%, for temp = 60  °C */
 
 	
 	//-------------------------------------------------------------------------
@@ -501,9 +537,11 @@ static void stc311x_set_battery_online(struct i2c_client *client)
 	struct stc311x_chip *chip = i2c_get_clientdata(client);
 
 
-	if (chip->stc311x_data && chip->stc311x_data->battery_online)
-		chip->online = chip->stc311x_data->battery_online();
-	else
+	// if (chip->stc311x_data && chip->stc311x_data->battery_online)
+		// chip->online = chip->stc311x_data->battery_online();
+	// else
+		// chip->online = BattData.BattOnline;
+	
 		chip->online = BattData.BattOnline;
 }
 
@@ -1399,8 +1437,12 @@ static void Reset_FSM_GG(void)
 
 /* -------------------- Algo functions ------------------------------------------- */
 
+//#define OPTIMIZATION_1 // default Optimization
+#define OPTIMIZATION_2 // advanced Optimization
 
-#define OG2 //Optimization2
+#ifdef OPTIMIZATION_1
+#define SOC_correction NULL
+#endif 
 
 static void SOC_correction (GasGauge_DataTypeDef *GG)
 {
@@ -1408,7 +1450,7 @@ static void SOC_correction (GasGauge_DataTypeDef *GG)
 	int Var2,Var3,Var4;
 	int SOCopt;
 
-#ifdef OG2
+#ifdef OPTIMIZATION_2
 
 #define CURRENT_TH  (GG->Cnom/10)  
 #define GAIN 10        
@@ -1428,12 +1470,12 @@ static void SOC_correction (GasGauge_DataTypeDef *GG)
 	Var1 = (Var1+1)/2;
 	if (Var1==0) Var1=1;
 	if (Var1>=VAR1MAX) Var1=VAR1MAX-1;
-	GG->Var1 = Var1;
+	//GG->Var1 = Var1;
 
 	Var4=BattData.CC_adj-BattData.VM_adj;
 	if (BattData.GG_Mode == CC_MODE)  
 		SOCopt = BattData.HRSOC + Var1 * Var4 / 64;
-	else
+	else //VM_MODE
 		SOCopt = BattData.HRSOC - BattData.CC_adj + Var1 * Var4 / 64;
 
 	Var2 = BattData.Nropt;
@@ -1658,7 +1700,7 @@ static int GasGauge_Task(GasGauge_DataTypeDef *GG)
 	{
 		BattData.BattOnline = 0; 
 	}
-	/* check STC3117 status */
+
 #ifdef BATD_UC8
 	/* check STC3117 status */
 	if ((BattData.STC_Status & (M_BATFAIL | M_UVLOD)) != 0)
@@ -2145,7 +2187,7 @@ static void stc311x_work(struct work_struct *work)
 	stc311x_set_battery_online(i2c_client_copy);
 	
 	
-	#if 1 //for DEBUG only
+	#if 0 //for DEBUG only
 	{
 		int counter;
 		counter = STC31xx_ReadWord(STC311x_REG_COUNTER);
@@ -2186,7 +2228,7 @@ static int stc311x_battery_i2c_probe(struct i2c_client *client,
 	GasGauge_DataTypeDef GasGaugeData;
 	
 	
-#if 1 //for DEBUG
+#if 0 //for DEBUG
 	printk("*********  STC311x probe started  ************************************\n");
 #endif
 
@@ -2348,9 +2390,13 @@ static int stc311x_battery_i2c_probe(struct i2c_client *client,
 		for(i=0;i<TEMPERAT_SIZE;i++)
 			GasGaugeData.CapDerating[i] = chip->stc311x_data->CapDerating[i];   
 		
-		/* OCV curve adjustment */
+		/* OCV full curve */
 		for(i=0;i<OCVTAB_SIZE;i++)
 			GasGaugeData.OCVValue[i] = chip->stc311x_data->OCVValue[i];    
+		
+		/* SOC table */
+		for(i=0;i<SOCTAB_SIZE;i++)
+			GasGaugeData.SOCValue[i] = chip->stc311x_data->SOCValue[i];
 		
 
 		if(chip->stc311x_data->ExternalTemperatureFunc != NULL)
