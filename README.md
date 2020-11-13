@@ -27,3 +27,13 @@ dtoverlay=stc3117 <br />
 If the driver is compiled as MODULE, To call the module: <br />
 	sudo modprobe stc3117_battery  <br />
 	lsmod <br />
+
+
+---------------------------------------------
+## Hardware
+
+* STC3117 daughter board connected to Raspberry Pi   <br/>
+<p align="center">
+<img src="https://raw.githubusercontent.com/st-sw/STC3117_LinuxDriver/main/images/STC3117_and_RaspberryPi.jpg" width="500">
+</p>
+
